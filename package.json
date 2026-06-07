@@ -1,0 +1,13 @@
+{
+  "name": "project-decision-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local web console for repo-grounded AI debates between Codex and Claude style agents.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Decision Hub</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">DH</div>
+          <div>
+            <h1>Decision Hub</h1>
+            <p>Repo-grounded AI debate console</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-title">Project</div>
+          <div class="kv">
+            <span>Root</span>
+            <strong id="projectRoot">Loading...</strong>
+          </div>
+          <label class="field root-field">
+            <span>Analyze root</span>
+            <div class="root-picker">
+              <input id="projectRootInput" spellcheck="false" placeholder="D:\Project\SaveHormuz" />
+              <button id="browseRootButton" class="secondary-button" type="button">Browse</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>OpenAI model</span>
+            <select id="codexModel">
+              <option value="" selected>Default</option>
+              <option value="gpt-5.5">GPT-5.5</option>
+              <option value="gpt-5.4">GPT-5.4</option>
+              <option value="o3">o3</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Custom OpenAI model</span>
+            <input id="customCodexModel" spellcheck="false" placeholder="Optional full model name" />
+          </label>
+          <label class="field">
+            <span>Claude model</span>
+            <select id="claudeModel">
+              <option value="" selected>Default</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
+              <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+              <option value="claude-opus-4-8">Claude Opus 4.8</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Custom Claude model</span>
+            <input id="customClaudeModel" spellcheck="false" placeholder="Optional full model name" />
+          </label>
+          <label class="field">
+            <span>Claude effort</span>
+            <select id="claudeEffort">
+              <option value="" selected>Default</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="xhigh">xHigh (ultracode 추론 수준)</option>
+              <option value="max">Max</option>
+            </select>
+          </label>
+          <div class="kv">
+            <span>Search</span>
+            <strong id="rgStatus">-</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">Settings</div>
+          <label class="field">
+            <span>Rounds</span>
+            <input id="rounds" type="number" min="1" max="4" value="2" />
+          </label>
+          <label class="field">
+            <span>Context files</span>
+            <input id="maxFiles" type="number" min="1" max="20" value="10" />
+          </label>
+          <label class="field">
+            <span>Tone</span>
+            <select id="style">
+              <option value="balanced" selected>Balanced</option>
+              <option value="sharp">Sharp</option>
+              <option value="exploratory">Exploratory</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">Recent</div>
+          <div id="sessions" class="session-list">
+            <span class="muted">No local sessions yet.</span>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <section class="composer">
+          <div class="composer-head">
+            <div>
+              <h2>Ask For A Debate</h2>
+              <p>Codex and Claude roles will inspect this project, argue, then synthesize a decision.</p>
+            </div>
+            <button id="startButton" class="primary-button">Start Debate</button>
+          </div>
+          <textarea id="question" spellcheck="false" placeholder="예: 메이즈 생성 모드 5종 도입이 100판 체감에 실제로 효과가 있을까?"></textarea>
+          <input id="extraPaths" class="path-input" placeholder="Optional files, comma-separated: docs/MARKET_ANALYSIS.md, game/scripts/core/maze_generator.gd" />
+        </section>
+
+        <section class="workspace">
+          <div class="context-panel">
+            <div class="section-head">
+              <h3>Repo Context</h3>
+              <span id="contextCount">0 files</span>
+            </div>
+            <div id="contextFiles" class="file-list">
+              <div class="empty">질문을 시작하면 관련 파일이 여기에 표시돼.</div>
+            </div>
+          </div>
+
+          <div class="debate-panel">
+            <div class="section-head">
+              <h3>Debate</h3>
+              <span id="statusText">Idle</span>
+            </div>
+            <div id="debateTabs" class="debate-tabs" role="tablist" aria-label="Debate turns"></div>
+            <div id="timeline" class="timeline" role="tabpanel">
+              <div class="welcome">
+                <div class="welcome-title">Ready when you are.</div>
+                <p>질문을 넣으면 프로젝트 파일을 읽고 Codex / Claude / Judge 순서로 토론을 보여준다.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

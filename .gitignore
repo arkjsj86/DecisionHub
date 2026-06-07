@@ -1,0 +1,5 @@
+.env
+sessions/
+*.log
+*.err
+logs/
