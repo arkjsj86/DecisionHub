@@ -208,6 +208,7 @@ server.listen(PORT, () => {
   console.log(`  URL: http://localhost:${PORT}`);
   console.log(`  Project: ${DEFAULT_PROJECT_ROOT}`);
   console.log(`  Codex provider: ${CODEX_PROVIDER} (${CODEX_PROVIDER === "cli" ? CODEX_MODEL : OPENAI_MODEL})`);
+  if (CODEX_PROVIDER === "cli") console.log(`  Codex CLI: ${CODEX_CLI_PATH}`);
   console.log(`  Claude provider: ${CLAUDE_PROVIDER} (${CLAUDE_PROVIDER === "cli" ? CLAUDE_MODEL || "default" : ANTHROPIC_MODEL})`);
 });
 
@@ -276,6 +277,12 @@ function getArgValue(name) {
 
 async function streamDebate(req, res) {
   activeDebates += 1;
+  // A debate is one streaming HTTP response. If the client disconnects (closes the
+  // tab or presses Stop, which aborts the fetch), cancel the in-flight CLI calls.
+  const controller = new AbortController();
+  const { signal } = controller;
+  res.on("close", () => controller.abort());
+
   const body = await readJsonBody(req);
   const question = String(body.question || "").trim();
   const rounds = clamp(Number(body.rounds || 2), 1, 4);
@@ -293,6 +300,7 @@ async function streamDebate(req, res) {
   });
 
   const write = (type, payload = {}) => {
+    if (res.writableEnded || res.destroyed) return;
     res.write(`${JSON.stringify({ type, ...payload })}\n`);
   };
 
@@ -334,6 +342,7 @@ async function streamDebate(req, res) {
       const codexText = await callCodexAgent({
         projectRoot: activeProjectRoot,
         model: codexModel,
+        signal,
         instructions: buildCodexInstructions(style),
         input: buildAgentPrompt({
           agentName: "Codex",
@@ -354,6 +363,7 @@ async function streamDebate(req, res) {
         projectRoot: activeProjectRoot,
         model: claudeModel,
         effort: claudeEffort,
+        signal,
         system: buildClaudeInstructions(style),
         input: buildAgentPrompt({
           agentName: "Claude",
@@ -374,6 +384,7 @@ async function streamDebate(req, res) {
     const judgeText = await callCodexAgent({
       projectRoot: activeProjectRoot,
       model: codexModel,
+      signal,
       instructions: buildJudgeInstructions(),
       input: buildJudgePrompt({ question, contextBlock, transcript }),
     });
@@ -383,11 +394,15 @@ async function streamDebate(req, res) {
     saveSession(session);
     write("done", { sessionId: session.id });
   } catch (error) {
-    write("error", { message: error.message || String(error) });
+    // An aborted debate is an intentional stop: partial results are discarded
+    // (we never reached saveSession) and it is not surfaced as an error.
+    if (!signal.aborted) {
+      write("error", { message: error.message || String(error) });
+    }
   } finally {
     activeDebates = Math.max(0, activeDebates - 1);
     scheduleShutdownIfIdle();
-    res.end();
+    if (!res.writableEnded) res.end();
   }
 }
 
@@ -810,19 +825,19 @@ function validateProviderConfig() {
   }
 }
 
-async function callCodexAgent({ projectRoot = DEFAULT_PROJECT_ROOT, model = CODEX_MODEL, instructions, input }) {
+async function callCodexAgent({ projectRoot = DEFAULT_PROJECT_ROOT, model = CODEX_MODEL, instructions, input, signal }) {
   if (CODEX_PROVIDER === "api") return callOpenAI({ instructions, input });
   if (CODEX_PROVIDER !== "cli") throw new Error(`지원하지 않는 CODEX_PROVIDER: ${CODEX_PROVIDER}`);
-  return callCodexCli({ projectRoot, model, instructions, input });
+  return callCodexCli({ projectRoot, model, instructions, input, signal });
 }
 
-async function callClaudeAgent({ projectRoot = DEFAULT_PROJECT_ROOT, model = CLAUDE_MODEL, effort = "", system, input }) {
+async function callClaudeAgent({ projectRoot = DEFAULT_PROJECT_ROOT, model = CLAUDE_MODEL, effort = "", system, input, signal }) {
   if (CLAUDE_PROVIDER === "api") return callAnthropic({ system, input });
   if (CLAUDE_PROVIDER !== "cli") throw new Error(`지원하지 않는 CLAUDE_PROVIDER: ${CLAUDE_PROVIDER}`);
-  return callClaudeCli({ projectRoot, model, effort, system, input });
+  return callClaudeCli({ projectRoot, model, effort, system, input, signal });
 }
 
-async function callCodexCli({ projectRoot, model, instructions, input }) {
+async function callCodexCli({ projectRoot, model, instructions, input, signal }) {
   const outputFile = path.join(SESSIONS_ROOT, `codex-last-${crypto.randomBytes(6).toString("hex")}.txt`);
   const args = [
     "exec",
@@ -842,7 +857,7 @@ async function callCodexCli({ projectRoot, model, instructions, input }) {
   const prompt = `${instructions}\n\n${input}`;
 
   try {
-    const result = await runCli(CODEX_CLI_PATH, args, prompt, projectRoot);
+    const result = await runCli(CODEX_CLI_PATH, args, prompt, projectRoot, signal);
     if (fs.existsSync(outputFile)) {
       const text = fs.readFileSync(outputFile, "utf8").trim();
       if (text) return text;
@@ -853,20 +868,25 @@ async function callCodexCli({ projectRoot, model, instructions, input }) {
   }
 }
 
-async function callClaudeCli({ projectRoot, model, effort, system, input }) {
+async function callClaudeCli({ projectRoot, model, effort, system, input, signal }) {
   const args = ["-p", "-", "--permission-mode", "dontAsk", "--output-format", "text"];
   if (model) args.push("--model", model);
   if (effort) args.push("--effort", effort);
   if (system) args.push("--system-prompt", system);
 
-  const result = await runCli(CLAUDE_CLI_PATH, args, input, projectRoot);
+  const result = await runCli(CLAUDE_CLI_PATH, args, input, projectRoot, signal);
   const text = stripAnsi(result.stdout).trim();
   if (!text) throw new Error("Claude CLI 응답에서 텍스트를 찾지 못했습니다.");
   return text;
 }
 
-function runCli(command, args, input, cwd = DEFAULT_PROJECT_ROOT) {
+function runCli(command, args, input, cwd = DEFAULT_PROJECT_ROOT, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("aborted"));
+      return;
+    }
+
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, NO_COLOR: "1" },
@@ -878,12 +898,32 @@ function runCli(command, args, input, cwd = DEFAULT_PROJECT_ROOT) {
     let stderr = "";
     let finished = false;
 
-    const timer = setTimeout(() => {
+    // Single completion path: clears the timer, drops the abort listener, and
+    // runs the settle callback exactly once (guards against close-after-abort).
+    const finish = (settle) => {
       if (finished) return;
       finished = true;
-      child.kill();
-      reject(new Error(`CLI 호출 시간이 초과되었습니다: ${command}`));
-    }, CLI_TIMEOUT_MS);
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
+      settle();
+    };
+
+    const onAbort = () =>
+      finish(() => {
+        killProcessTree(child);
+        reject(new Error("aborted"));
+      });
+
+    const timer = setTimeout(
+      () =>
+        finish(() => {
+          killProcessTree(child);
+          reject(new Error(`CLI 호출 시간이 초과되었습니다: ${command}`));
+        }),
+      CLI_TIMEOUT_MS,
+    );
+
+    if (signal) signal.addEventListener("abort", onAbort);
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -893,26 +933,45 @@ function runCli(command, args, input, cwd = DEFAULT_PROJECT_ROOT) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", (error) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`CLI 호출 실패(${code}): ${tail(`${stderr}\n${stdout}`, 5000)}`));
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
+    child.on("error", (error) => finish(() => reject(error)));
+    child.on("close", (code) =>
+      finish(() => {
+        if (code !== 0) {
+          reject(new Error(`CLI 호출 실패(${code}): ${tail(`${stderr}\n${stdout}`, 5000)}`));
+          return;
+        }
+        resolve({ stdout, stderr });
+      }),
+    );
 
     child.stdin.write(input, "utf8");
     child.stdin.end();
   });
+}
+
+function killProcessTree(child) {
+  if (!child || child.pid == null) return;
+  if (process.platform === "win32") {
+    // child.kill() only signals the immediate process, but codex/claude spawn
+    // helper processes — kill the whole tree by PID. Best-effort: if taskkill
+    // is unavailable, fall back to signalling just the child.
+    const result = spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      windowsHide: true,
+    });
+    if (result.status !== 0) {
+      try {
+        child.kill();
+      } catch {
+        /* process already gone */
+      }
+    }
+  } else {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* process already gone */
+    }
+  }
 }
 
 function cleanCodexStdout(text) {
@@ -930,8 +989,116 @@ function cleanCodexStdout(text) {
 }
 
 function defaultCodexCliPath() {
-  const candidate = path.join(process.env.USERPROFILE || "", ".codex", ".sandbox-bin", "codex.exe");
-  return fs.existsSync(candidate) ? candidate : "codex";
+  // Codex installs several version-pinned binaries side by side (a stable
+  // bin\codex.exe plus version-hashed folders, and a legacy .sandbox-bin shim).
+  // Older binaries get rejected by the backend for newer models — e.g.
+  // "The 'gpt-5.5' model requires a newer version of Codex". So we resolve the
+  // NEWEST installed binary here, matching whatever the interactive Codex app
+  // uses. This runs once per startup, so it keeps working across Codex updates
+  // (which drop the new build into a fresh hash folder) without manual config.
+  // Override explicitly with CODEX_CLI_PATH in .env if you need a specific build.
+  return newestInstalledCodex() || "codex";
+}
+
+function newestInstalledCodex() {
+  let best = null;
+  for (const exePath of collectCodexCandidates()) {
+    const version = readCodexVersion(exePath);
+    if (!version) continue;
+    if (!best || compareSemver(version, best.version) > 0) {
+      best = { path: exePath, version };
+    }
+  }
+  return best ? best.path : null;
+}
+
+function collectCodexCandidates() {
+  // Insertion order matters: stable, non-hashed paths are added before the
+  // version-hashed folders so that, on a version tie, the stable path wins
+  // (compareSemver only replaces the pick when STRICTLY newer).
+  const out = new Set();
+  const addFile = (filePath) => {
+    try {
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) out.add(filePath);
+    } catch {
+      /* unreadable candidate — skip */
+    }
+  };
+
+  const localAppData = process.env.LOCALAPPDATA || "";
+  if (localAppData) {
+    const binRoot = path.join(localAppData, "OpenAI", "Codex", "bin");
+    addFile(path.join(binRoot, "codex.exe"));
+    addFile(path.join(binRoot, "codex"));
+    let entries = [];
+    try {
+      entries = fs.readdirSync(binRoot, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      addFile(path.join(binRoot, entry.name, "codex.exe"));
+      addFile(path.join(binRoot, entry.name, "codex"));
+    }
+  }
+
+  // Legacy sandbox shim — older, but a valid last-resort candidate.
+  const userProfile = process.env.USERPROFILE || "";
+  if (userProfile) addFile(path.join(userProfile, ".codex", ".sandbox-bin", "codex.exe"));
+
+  return [...out];
+}
+
+function readCodexVersion(exePath) {
+  try {
+    const result = spawnSync(exePath, ["--version"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000,
+    });
+    if (result.status !== 0 || !result.stdout) return null;
+    const match = result.stdout.match(/(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/);
+    return match ? match[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function compareSemver(a, b) {
+  const pa = parseSemver(a);
+  const pb = parseSemver(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i] - pb.core[i];
+  }
+  // A release (no prerelease) outranks any prerelease of the same core version.
+  if (pa.pre.length === 0 && pb.pre.length > 0) return 1;
+  if (pa.pre.length > 0 && pb.pre.length === 0) return -1;
+  const len = Math.max(pa.pre.length, pb.pre.length);
+  for (let i = 0; i < len; i += 1) {
+    const x = pa.pre[i];
+    const y = pb.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const xNum = /^\d+$/.test(x);
+    const yNum = /^\d+$/.test(y);
+    if (xNum && yNum) {
+      if (Number(x) !== Number(y)) return Number(x) - Number(y);
+    } else if (xNum !== yNum) {
+      // Numeric identifiers rank lower than alphanumeric ones (semver §11).
+      return xNum ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+function parseSemver(version) {
+  const [coreText, preText = ""] = String(version).split("-");
+  const core = coreText.split(".").map((part) => Number(part) || 0);
+  while (core.length < 3) core.push(0);
+  return { core: core.slice(0, 3), pre: preText ? preText.split(".") : [] };
 }
 
 async function callOpenAI({ instructions, input }) {
