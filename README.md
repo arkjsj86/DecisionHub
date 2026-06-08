@@ -7,14 +7,27 @@
 ## 빠른 시작
 
 1. 이 폴더를 프로젝트 루트에 둡니다.
-2. 서버를 실행합니다.
+2. 서버를 실행합니다. 아래 두 방법 중 하나를 쓰면 됩니다.
 
-```powershell
-cd project-decision-hub
-node server.js
-```
+**방법 1 — 콘솔 창이 보이는 실행 (`run-hub.bat`)**
 
-또는 Windows에서는 `start.cmd`를 실행해도 됩니다.
+`run-hub.bat`을 더블클릭합니다.
+
+- 서버가 **별도 콘솔 창**(`Decision Hub Server`)에서 뜨고, 로그가 그 창에 **실시간으로** 표시됩니다.
+- 이미 서버가 떠 있으면 새로 띄우지 않고 브라우저만 엽니다.
+- 약 2초 뒤 브라우저가 자동으로 열립니다.
+- 로그를 바로 확인하거나 문제를 디버깅할 때 적합합니다. **그 창을 닫으면 서버가 종료됩니다.**
+
+**방법 2 — 콘솔 창 없이 실행 (`start-hidden.vbs`)**
+
+`start-hidden.vbs`를 더블클릭합니다.
+
+- **콘솔 창 없이** 백그라운드에서 서버가 뜨고, 약 2.5초 뒤 브라우저가 자동으로 열립니다.
+- 로그는 화면 대신 **`logs/server.log`** 파일에 누적됩니다 (실행할 때마다 타임스탬프 구분선과 함께 기록).
+- 멈추려면 **브라우저 탭을 닫으면** 됩니다 — 유휴 상태가 되면 서버가 자동 종료됩니다.
+- 평소 사용에는 이 방법을 권장합니다.
+
+> 터미널에서 직접 띄우려면 이 폴더에서 `node server.js` 를 실행해도 됩니다.
 
 3. 브라우저에서 엽니다.
 
@@ -71,6 +84,7 @@ PROJECT_ROOT=D:\Project\OtherGame
 - `Claude model`: Claude CLI(`--model`)에 넘길 모델입니다. `Default`, `Sonnet`, `Opus` 또는 `Custom Claude model`에 전체 모델명을 사용할 수 있습니다.
 - `Claude effort`: Claude CLI(`--effort`)에 넘길 추론 강도입니다. `Default`, `Low`, `Medium`, `High`, `xHigh`, `Max`. `ultracode`는 대화형 세션 전용 설정이라 headless `claude -p` 호출에는 넘길 수 없으며, 추론 강도 기준 가장 가까운 값은 `xHigh`입니다.
 - `Optional files`: 꼭 포함할 파일을 쉼표로 직접 지정합니다.
+- `Start Debate` / `Stop Debate`: 토론을 시작합니다. 실행 중에는 버튼이 빨간 `Stop Debate`로 바뀌고, 누르면 진행 중인 codex/claude 호출을 즉시 중단합니다(중간 결과는 저장하지 않음).
 
 > 모델/effort 선택기는 Project 패널에 모여 있습니다. 기존의 OpenAI/Claude provider 상태줄(`cli · 모델명`)은 선택기와 중복이라 제거했습니다. CLI 미설치·API 키 누락은 토론 시작 시 에러로 표시됩니다.
 
@@ -106,6 +120,7 @@ ANTHROPIC_MODEL=claude-opus-4-7
 ## 주의점
 
 - 기본 CLI 모드는 현재 로컬에 로그인된 Codex CLI와 Claude CLI를 호출합니다.
+- 서버는 시작할 때 설치된 Codex CLI 중 **가장 최신 버전**을 자동으로 찾아 사용합니다(구버전은 백엔드에서 최신 모델이 거부될 수 있음 — 예: `gpt-5.5`). 특정 binary로 고정하려면 `.env`의 `CODEX_CLI_PATH`를 지정하세요.
 - API 모드로 바꾼 경우에만 OpenAI API와 Anthropic API 비용이 발생합니다.
 - `sessions/`와 `.env`는 `.gitignore`에 들어가 있습니다.
 - 모델명이 계정에서 지원되지 않으면 `.env`의 `OPENAI_MODEL`, `ANTHROPIC_MODEL`을 바꾸면 됩니다.
