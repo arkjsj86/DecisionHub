@@ -23,6 +23,7 @@ const els = {
 };
 
 let isRunning = false;
+let abortController = null;
 let tabs = [];
 let activeTabIndex = -1;
 const clientId = getClientId();
@@ -32,7 +33,8 @@ boot();
 startHeartbeat();
 
 els.startButton.addEventListener("click", () => {
-  if (!isRunning) startDebate();
+  if (isRunning) stopDebate();
+  else startDebate();
 });
 
 els.browseRootButton.addEventListener("click", () => {
@@ -219,8 +221,9 @@ async function startDebate() {
   }
 
   isRunning = true;
-  els.startButton.disabled = true;
-  els.startButton.textContent = "Running...";
+  abortController = new AbortController();
+  els.startButton.textContent = "Stop Debate";
+  els.startButton.classList.add("stop");
   resetDebateView();
   els.contextFiles.innerHTML = '<div class="empty">관련 파일을 찾는 중...</div>';
   els.contextCount.textContent = "0 files";
@@ -246,6 +249,7 @@ async function startDebate() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: abortController.signal,
     });
 
     if (!response.ok || !response.body) {
@@ -254,14 +258,28 @@ async function startDebate() {
 
     await readNdjsonStream(response.body, handleEvent);
   } catch (error) {
-    addMessage({ agent: "Error", text: error.message, kind: "error" });
-    setStatus("Error");
+    if (error.name === "AbortError") {
+      setStatus("중단됨");
+    } else {
+      addMessage({ agent: "Error", text: error.message, kind: "error" });
+      setStatus("Error");
+    }
   } finally {
     isRunning = false;
+    abortController = null;
     els.startButton.disabled = false;
     els.startButton.textContent = "Start Debate";
+    els.startButton.classList.remove("stop");
     await refreshSessions();
   }
+}
+
+function stopDebate() {
+  if (!abortController) return;
+  // Aborting the fetch closes the connection; the server detects the disconnect
+  // and kills the in-flight codex/claude process tree. Partial results are dropped.
+  abortController.abort();
+  setStatus("중단 중...");
 }
 
 function selectedCodexModel() {
