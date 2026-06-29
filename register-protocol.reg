@@ -1,0 +1,14 @@
+Windows Registry Editor Version 5.00
+
+; Decision Hub custom URL protocol.
+; Lets the in-page "Start server" button boot the local server via:
+;     decisionhub://start
+; Per-user (HKCU) only -- no admin rights needed. Remove with unregister-protocol.reg.
+; If you move the project folder, update the path on the command line below.
+
+[HKEY_CURRENT_USER\Software\Classes\decisionhub]
+@="URL:DecisionHub Protocol"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\decisionhub\shell\open\command]
+@="\"C:\\Windows\\System32\\wscript.exe\" \"D:\\Project\\DecisionHub\\start-server-only.vbs\" \"%1\""

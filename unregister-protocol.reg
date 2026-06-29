@@ -1,0 +1,6 @@
+Windows Registry Editor Version 5.00
+
+; Removes the Decision Hub "decisionhub://" custom URL protocol.
+; Double-click to undo register-protocol.reg.
+
+[-HKEY_CURRENT_USER\Software\Classes\decisionhub]

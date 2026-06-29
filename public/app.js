@@ -28,6 +28,7 @@ let tabs = [];
 let activeTabIndex = -1;
 const clientId = getClientId();
 let heartbeatTimer = null;
+let recoveryPoller = null;
 
 boot();
 startHeartbeat();
@@ -100,7 +101,7 @@ async function refreshHealth() {
     els.maxFiles.value = data.defaults?.maxContextFiles || 10;
   } catch (error) {
     els.projectRoot.textContent = "server error";
-    addMessage({ agent: "Error", text: error.message, kind: "error" });
+    reportClientError(error);
   }
 }
 
@@ -204,8 +205,7 @@ async function browseForRoot() {
     }
     throw new Error(response.error || "Folder picker failed");
   } catch (error) {
-    addMessage({ agent: "Error", text: error.message, kind: "error" });
-    setStatus("Error");
+    reportClientError(error);
   } finally {
     els.browseRootButton.disabled = false;
     els.browseRootButton.textContent = previousText;
@@ -261,8 +261,7 @@ async function startDebate() {
     if (error.name === "AbortError") {
       setStatus("중단됨");
     } else {
-      addMessage({ agent: "Error", text: error.message, kind: "error" });
-      setStatus("Error");
+      reportClientError(error);
     }
   } finally {
     isRunning = false;
@@ -347,6 +346,10 @@ function renderContext(files) {
 }
 
 function resetDebateView() {
+  if (recoveryPoller) {
+    window.clearInterval(recoveryPoller);
+    recoveryPoller = null;
+  }
   tabs = [];
   activeTabIndex = -1;
   els.debateTabs.innerHTML = "";
@@ -434,6 +437,105 @@ function activateTab(index) {
 
 function setStatus(text) {
   els.statusText.textContent = text || "Idle";
+}
+
+// A failed fetch (server unreachable) throws a TypeError ("Failed to fetch").
+// A server that responded with an error status is a normal Error, not this.
+function isConnectionError(error) {
+  return error instanceof TypeError || error?.name === "TypeError";
+}
+
+// Route any client-side error: a dead-server connection failure shows the
+// "Start server" affordance; anything else falls back to a plain error card.
+function reportClientError(error) {
+  if (isConnectionError(error)) {
+    showServerDown();
+    return;
+  }
+  addMessage({ agent: "Error", text: error.message, kind: "error" });
+  setStatus("Error");
+}
+
+function showServerDown() {
+  setStatus("서버 꺼짐");
+  addMessage({
+    agent: "Error",
+    kind: "error",
+    text:
+      "로컬 서버에 연결할 수 없어요 — 서버가 꺼져 있는 것 같습니다.\n\n" +
+      "탭의 **⚡ 서버 켜기** 버튼을 누르면 등록된 로컬 서버를 실행합니다. " +
+      '처음 한 번은 브라우저가 "DecisionHub을(를) 여시겠습니까?"라고 물어요 — **열기**를 누르세요. ' +
+      "서버가 뜨면 자동으로 다시 연결됩니다.",
+  });
+  attachServerStartButton();
+  ensureRecoveryPolling();
+}
+
+function attachServerStartButton() {
+  if (document.getElementById("serverStartTab")) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "serverStartTab";
+  btn.className = "debate-tab server-start";
+  btn.innerHTML = `
+    <span class="tab-dot" aria-hidden="true"></span>
+    <span class="tab-label">⚡ 서버 켜기</span>
+  `;
+  btn.addEventListener("click", () => startServerViaProtocol(btn));
+  els.debateTabs.appendChild(btn);
+  els.debateTabs.classList.add("has-tabs");
+}
+
+function removeServerStartButton() {
+  const btn = document.getElementById("serverStartTab");
+  if (btn) btn.remove();
+}
+
+function startServerViaProtocol(btn) {
+  setStatus("서버 시작 요청 중...");
+  if (btn) {
+    btn.disabled = true;
+    const label = btn.querySelector(".tab-label");
+    if (label) label.textContent = "서버 시작 중...";
+  }
+  // The decisionhub:// protocol (register-protocol.reg) runs start-server-only.vbs.
+  // Setting location to a custom scheme triggers the handler without unloading us.
+  window.location.href = "decisionhub://start";
+  ensureRecoveryPolling();
+
+  // If nothing comes back in time, let the user retry and hint at registration.
+  window.setTimeout(() => {
+    if (!recoveryPoller) return; // already recovered — poller was cleared
+    const stillThere = document.getElementById("serverStartTab");
+    if (!stillThere) return;
+    stillThere.disabled = false;
+    const label = stillThere.querySelector(".tab-label");
+    if (label) label.textContent = "⚡ 서버 켜기 (다시 시도)";
+    setStatus("아직 응답이 없어요 — register-protocol.reg 등록 여부를 확인하세요.");
+  }, 15000);
+}
+
+function ensureRecoveryPolling() {
+  if (recoveryPoller) return;
+  recoveryPoller = window.setInterval(async () => {
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      if (res.ok) onServerRecovered();
+    } catch (_) {
+      // still down — keep polling
+    }
+  }, 2000);
+}
+
+async function onServerRecovered() {
+  if (recoveryPoller) {
+    window.clearInterval(recoveryPoller);
+    recoveryPoller = null;
+  }
+  removeServerStartButton();
+  setStatus("서버 연결됨 — 다시 토론을 시작하세요");
+  await refreshHealth();
+  await refreshSessions();
 }
 
 async function readNdjsonStream(body, onEvent) {

@@ -492,6 +492,27 @@ textarea {
   background: var(--danger);
 }
 
+.debate-tab.server-start {
+  color: var(--bg);
+  background: var(--codex);
+  border-color: var(--codex);
+  font-weight: 800;
+}
+
+.debate-tab.server-start:hover {
+  color: var(--bg);
+  filter: brightness(1.08);
+}
+
+.debate-tab.server-start:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.debate-tab.server-start .tab-dot {
+  background: var(--bg);
+}
+
 .tab-new {
   width: 0.4rem;
   height: 0.4rem;
