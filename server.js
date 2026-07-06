@@ -845,6 +845,11 @@ async function callCodexCli({ projectRoot, model, instructions, input, signal })
     projectRoot,
     "-s",
     "read-only",
+    // The debate is read-only (-s read-only, --ephemeral: Codex never writes to
+    // the project), so Codex's git-repo guard is unnecessary. Without this flag it
+    // refuses any project root that isn't a Git repo (or a Codex-trusted dir) with
+    // "Not inside a trusted directory and --skip-git-repo-check was not specified."
+    "--skip-git-repo-check",
     "-m",
     model || CODEX_MODEL,
     "--color",
